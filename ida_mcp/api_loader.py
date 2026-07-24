@@ -10,6 +10,7 @@ def ensure_api_modules_loaded() -> None:
     to call multiple times (subsequent calls are no-ops).
     """
     from . import api_analysis  # noqa: F401
+    from . import api_compress  # noqa: F401
     from . import api_core  # noqa: F401
     from . import api_debug  # noqa: F401
     from . import api_lifecycle  # noqa: F401

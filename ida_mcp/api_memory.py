@@ -31,44 +31,46 @@ except ImportError:
 def get_bytes(
     addr: Annotated[Union[int, str], "Address(es) to read from - single or comma-separated"],
     size: Annotated[int, "Number of bytes to read (1..4096)"] = 16,
+    offset: Annotated[int, "Byte offset added to each address; page through large regions by advancing offset += returned size"] = 0,
 ) -> List[dict]:
-    """Read raw bytes at address(es)."""
+    """Read raw bytes at address(es). Page large regions via offset += returned size."""
     if size <= 0:
         return [{"error": "size must be > 0"}]
     if size > 4096:
         return [{"error": "size too large (max 4096)"}]
     if ida_bytes is None:
         return [{"error": "ida_bytes unavailable"}]
-    
+
     queries = normalize_list_input(addr)
     results = []
-    
+
     for query in queries:
         parsed = parse_address(query)
         if not parsed["ok"] or parsed["value"] is None:
             results.append({"error": "invalid address", "query": query})
             continue
-        
-        address = parsed["value"]
+
+        address = parsed["value"] + offset
         try:
             data = ida_bytes.get_bytes(address, size)
             if data is None:
                 results.append({"error": "failed to read", "query": query, "address": hex_addr(address)})
                 continue
-            
+
             byte_list = list(data)
             hex_str = ' '.join(f'{b:02X}' for b in byte_list)
-            
+
             results.append({
                 "query": query,
                 "address": hex_addr(address),
+                "offset": offset,
                 "size": len(byte_list),
                 "bytes": byte_list,
                 "hex": hex_str,
             })
         except Exception as e:
             results.append({"error": str(e), "query": query, "address": hex_addr(address)})
-    
+
     return results
 
 

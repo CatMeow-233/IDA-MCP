@@ -416,15 +416,25 @@ def _detect_ida_python(ida_dir: str) -> list[dict[str, str]]:
 
 def _guess_ida_dir() -> str | None:
     if sys.platform == "win32":
+        import glob as _glob
+
         pf = os.environ.get("ProgramFiles", r"C:\Program Files")
         pf86 = os.environ.get("ProgramFiles(x86)", "")
-        for c in [
+        candidates = [
             r"D:\IDAPro9.3",
             r"D:\IDAPro",
             os.path.join(pf, "IDA Pro"),
             os.path.join(pf, "IDA Freeware"),
-        ] + ([os.path.join(pf86, "IDA Pro")] if pf86 else []):
-            if os.path.isdir(c):
+        ] + ([os.path.join(pf86, "IDA Pro")] if pf86 else [])
+        # 版本化目录通配（D:\ida9.2 / D:\IDAPro9.x / Program Files\IDA* 等）
+        for pat in (r"D:\ida*", r"D:\IDA*", os.path.join(pf, "IDA*")):
+            candidates.extend(sorted(_glob.glob(pat), reverse=True))
+        for c in candidates:
+            if os.path.isdir(c) and (
+                os.path.exists(os.path.join(c, "ida.exe"))
+                or os.path.exists(os.path.join(c, "ida64.exe"))
+                or os.path.isdir(os.path.join(c, "plugins"))
+            ):
                 return c
     elif sys.platform == "darwin":
         for c in ["/Applications/IDA Pro", "/Applications/IDA Freeware"]:

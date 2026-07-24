@@ -14,7 +14,11 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from . import instance_registry as registry
-from .config import get_gateway_token, get_request_timeout
+from .config import ensure_loopback_no_proxy, get_gateway_token, get_request_timeout
+
+# Gateway-to-instance calls are loopback-only; keep them off any system proxy
+# (httpx reads the Windows registry proxy but ignores ProxyOverride).
+ensure_loopback_no_proxy()
 
 
 LOCALHOST = "127.0.0.1"

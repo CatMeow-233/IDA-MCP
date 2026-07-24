@@ -6,6 +6,6 @@
     "entryPoint": "ida_mcp.py",
     "idaVersions": ">=8.4",
     "description": "FastMCP server, gateway, and automation tools for IDA Pro.",
-    "version": "0.1.3"
+    "version": "0.2.1"
   }
 }

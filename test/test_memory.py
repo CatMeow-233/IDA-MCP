@@ -63,6 +63,18 @@ class TestGetBytes:
         assert isinstance(result, list)
         assert len(result) == 3
 
+    def test_get_bytes_offset_paging(self, tool_caller, first_function_address):
+        """Test offset paging: two consecutive pages tile one larger read."""
+        addr = hex(first_function_address)
+        full = tool_caller("get_bytes", {"addr": addr, "size": 32})
+        page1 = tool_caller("get_bytes", {"addr": addr, "size": 16, "offset": 0})
+        page2 = tool_caller("get_bytes", {"addr": addr, "size": 16, "offset": 16})
+        for r in (full, page1, page2):
+            assert isinstance(r, list) and r, r
+            assert "error" not in r[0], r[0]
+        assert page1[0]["hex"] + " " + page2[0]["hex"] == full[0]["hex"]
+        assert page2[0]["offset"] == 16
+
     def test_get_complex_patch_bytes(self, tool_caller, complex_baseline):
         patch_bytes = complex_baseline["globals"]["ida_mcp_patch_bytes"]
         result = tool_caller("get_bytes", {"addr": patch_bytes["ea"], "size": patch_bytes["size"]})

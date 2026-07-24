@@ -378,3 +378,24 @@ def get_server_name() -> str:
     config = load_config()
     name = str(config.get("server_name", "IDA-MCP")).strip()
     return name or "IDA-MCP"
+
+
+def ensure_loopback_no_proxy() -> None:
+    """Ensure loopback hosts bypass any OS-level HTTP proxy.
+
+    FastMCP's client (httpx with trust_env=True) picks up the Windows system
+    proxy from the registry via urllib.getproxies() but ignores the
+    ProxyOverride bypass list, so loopback MCP calls get routed through the
+    local proxy and fail (e.g. 502 Bad Gateway).  All IDA-MCP traffic is
+    loopback, so force NO_PROXY/no_proxy to cover 127.0.0.1 and localhost.
+    """
+    for key in ("NO_PROXY", "no_proxy"):
+        entries = [
+            item.strip()
+            for item in os.environ.get(key, "").split(",")
+            if item.strip()
+        ]
+        for host in ("127.0.0.1", "localhost"):
+            if host not in entries:
+                entries.append(host)
+        os.environ[key] = ",".join(entries)

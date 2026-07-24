@@ -15,6 +15,7 @@ Provides tools:
 """
 from __future__ import annotations
 
+import re
 from typing import Annotated, Optional, List, Dict, Any, Union
 
 from .rpc import tool
@@ -34,6 +35,7 @@ try:
     import ida_gdl  # type: ignore
     import ida_segment  # type: ignore
     import ida_typeinf  # type: ignore
+    import ida_lines  # type: ignore
 except ImportError:
     idaapi = None
     ida_ida = None
@@ -45,11 +47,30 @@ except ImportError:
     ida_gdl = None
     ida_segment = None
     ida_typeinf = None
+    ida_lines = None
 
 
 # ============================================================================
 # Internal helpers
 # ============================================================================
+
+
+def _strip_tags(text):
+    """剥离 generate_disasm_line(flags=0) 残留的 IDA 颜色转义标签。
+
+    优先用 IDA 自带的 ida_lines.tag_remove（能正确处理地址标签：COLOR_ADDR
+    后的 16 位隐藏 hex 载荷也一并删除，只留符号名）。离线兜底与
+    compress.parse.strip_ida_tags 同规则。
+    """
+    if not text:
+        return text
+    if ida_lines is not None:
+        try:
+            return ida_lines.tag_remove(text)
+        except Exception:
+            pass
+    text = re.sub(r"\x01\([0-9A-Fa-f]{16}|\x01\([0-9A-Fa-f]{8}", "", text)
+    return re.sub(r"[\x01\x02].?", "", text)
 
 def _resolve_function(query: Union[int, str]) -> dict:
     """Resolve a function by address or symbol name."""
@@ -143,7 +164,7 @@ def _is_call_insn(ea: int) -> bool:
         pass
 
     try:
-        line = idaapi.generate_disasm_line(ea, 0)
+        line = _strip_tags(idaapi.generate_disasm_line(ea, 0))
         if line:
             return str(line).lstrip().lower().startswith("call")
     except Exception:
@@ -283,7 +304,11 @@ def _decompile_single(query: str) -> dict:
 
     text, error = _decompile_text(info)
     if error:
-        return {"error": error, "query": query}
+        return {
+            "error": error,
+            "query": query,
+            "hint": "decompile failed; use compress_function (SEMZ) or disasm for an instruction-level view",
+        }
 
     return {
         "query": query,
@@ -350,7 +375,7 @@ def _disasm_single(query: str) -> dict:
             # instruction text
             text = None
             try:
-                text = idaapi.generate_disasm_line(head_ea, 0)
+                text = _strip_tags(idaapi.generate_disasm_line(head_ea, 0))
             except Exception:
                 text = None
             if text is None:
@@ -467,7 +492,7 @@ def linear_disasm(
             # instruction text
             text = None
             try:
-                text = idaapi.generate_disasm_line(ea, 0)
+                text = _strip_tags(idaapi.generate_disasm_line(ea, 0))
             except Exception:
                 text = None
             if text is None:
@@ -821,7 +846,7 @@ def xrefs_to_field(
                     
                     line = None
                     try:
-                        line = idaapi.generate_disasm_line(ea, 0)
+                        line = _strip_tags(idaapi.generate_disasm_line(ea, 0))
                     except Exception:
                         line = None
                     

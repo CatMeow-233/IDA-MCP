@@ -12,6 +12,7 @@ IDA-MCP/
 ├── ida_mcp.py          # IDA plugin entry point, exposes PLUGIN_ENTRY()
 ├── ida-plugin.json     # IDA plugin metadata
 ├── ida_mcp/            # plugin package, gateway, proxy, tools, resources
+├── instructor/         # LLM instructor: SEMZ decoding manual + system prompt
 ├── install.py          # interactive installer
 ├── test/               # live-IDA pytest suite
 ├── API.md              # MCP, tool, resource, and internal HTTP contract
@@ -28,6 +29,62 @@ IDA-MCP/
 - Tool registration is decorator based: use `@tool` plus `@idaread` or `@idawrite`.
 - Gateway requests require `gateway_token`; an empty token fails closed.
 - `py_eval`, `patch_bytes`, `apply_patch`, and `dbg_*` tools are unsafe and gated by `enable_unsafe=false` by default in `ida_mcp/config.conf`.
+
+## SEMZ Compression Tools
+
+SEMZ v1 (`ida_mcp/compress/`, pure Python, no IDA SDK dependency) compresses
+disassembly into a compact self-contained DSL for LLM consumption: mnemonic /
+register dictionaries (`#MN`/`#RG`), a constant pool (`#CT`), mined instruction
+sequence macros (`#SQ`), basic-block labels, and conservative dead-code
+elimination (`#ELIM`).
+
+- `compress_function(query, level)` — resolve a function by address or name and
+  compress it.
+- `compress_range(start, end, level)` — linear-disassemble an address range
+  (`idautils.Heads`) and compress it.
+- `compress_text(asm_text, level)` — compress raw assembly / trace text
+  (IDA export, x64dbg `addr | bytes | disasm` traces, or bare instructions);
+  pure computation, does not touch the IDA SDK.
+- `extract_block(query, labels)` — re-run the deterministic ultra compression
+  and return the header lines plus only the requested blocks (`"L7"` /
+  `"L7,L8"` / list), for feeding single blocks to sub-agents without
+  hand-cutting the full text.
+
+In-function direct branch targets are always rendered as `Ln` labels
+(including IDA-named `loc_xxx` targets). Pass `with_map=true` to any
+`compress_*` tool to get the label→address map (`{"L0":"0x..",...}` inline,
+or an `<out_file>.map.json` sidecar when spilling to disk).
+
+**LLM instructor**: `instructor/LLM_INSTRUCTOR.md` is the SEMZ decoding manual
+(ARM64/x86/x64 fixed tables, ultra syntax, work rules) plus a ready-to-use
+system-prompt template — attach it (or its 10-line quick card) whenever you
+feed compressed text to a model; the fixed dictionaries deliberately never
+travel with the output, which is where the compression ratio comes from.
+
+`level` selects the aggressiveness: `safe` (dictionaries only, no elimination),
+`full` (adds conservative liveness-based dead-code elimination with a deletion
+log), `max` (adds nop/padding removal and cmp/test+jcc fusion, e.g.
+`cjz L4: t a, a`), and `ultra` (the default: globally fixed mnemonic/register
+tables with no `#MN`/`#RG` headers, always-on fusion `gz L5: t a` and DCE,
+zeroing/test idioms, multi-push folding, standard stack-frame elision `#f=N`,
+and constants/macros pooled only when repeated at least twice). All levels return `{name, ea, level, stats, truncated, compressed}`
+(`compressed` last, so display truncation never hides the stats); inline output
+longer than 120,000 characters is truncated. Large outputs can instead be paged
+with `line_offset`/`line_limit` (line-granularity slices, response adds
+`line_offset`/`line_total`) or spilled to disk with `out_file` (relative paths
+land in `%TEMP%/ida_mcp_out/`; response returns `{..., file, chars}` without
+`compressed`). Spilled files are temporary — delete them after the user
+confirms the task is done.
+
+ARM64 / x86 / x64 are all first-class targets (three architectures): all three
+tools take an optional `arch` argument (`auto`/`x86`/`x64`/`arm64`, default
+`auto` — heuristics on register names/`#imm`/mnemonics/`dword`/`qword` for
+text, IDB `procname`+bitness for IDA-side tools). ARM64 gets its own fixed
+ultra table (`q D,E,[S-50]!` = stp x29,x30, `geq L2: f a,10` = cmp+b.eq
+fusion, `stp`/`ldp` frame elision `#f=N`); x86 (32-bit) reuses the x64
+mnemonic table with bare register codes meaning 32-bit (`a`=eax), dword as the
+default memory width, segment-prefix memory kept as `[fs+30]`, `retn N` kept
+as `r N`, and `push ebp`-style frame elision `#f=N`.
 
 ## Installation
 

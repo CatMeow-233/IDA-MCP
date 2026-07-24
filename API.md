@@ -198,9 +198,36 @@ gateway/control 面的包装错误常见格式：
 
 | Tool | Parameters | Request Example | Expected Response |
 | --- | --- | --- | --- |
-| `get_bytes` | `addr: int | str`, `size?: int` | `{"addr":"0x401000","size":16}` | `[{query, address, size, bytes, hex}]` 或每项 `{error, query, address?}` |
+| `get_bytes` | `addr: int | str`, `size?: int` (1..4096), `offset?: int` | `{"addr":"0x401000","size":16,"offset":32}` | `[{query, address, offset, size, bytes, hex}]` 或每项 `{error, query, address?}`；大区域按 `offset += 返回 size` 翻页 |
 | `read_scalar` | `addr: int | str`, `width?: int`, `signed?: bool` | `{"addr":"0x401000","width":4,"signed":false}` | `[{query, address, width, signed, value, unsigned, hex}]` |
 | `get_string` | `addr: int | str`, `max_len?: int` | `{"addr":"0x404000","max_len":128}` | `[{query, address, length, text}]` |
+
+### 4.3.1 Compress Tools (SEMZ)
+
+把反汇编压缩为 SEMZ DSL 文本（面向 LLM 的体积压缩；理解语义应优先 `decompile`/`disasm`，详见 `instructor/LLM_INSTRUCTOR.md`）。三工具共用参数与返回约定：
+
+| Tool | Parameters | Request Example | Expected Response |
+| --- | --- | --- | --- |
+| `compress_function` | `query: int | str`, `level?: safe\|full\|max\|ultra`, `arch?: auto\|x86\|x64\|arm64`, 加分页/落盘参数 | `{"query":"main","level":"ultra"}` | 见下方返回约定 |
+| `compress_range` | `start: int | str`, `end: int | str`, `level?`, `arch?`, 加分页/落盘参数 | `{"start":"0xD90","end":"0x26DC"}` | 同上 |
+| `compress_text` | `asm_text: str`, `level?`, `arch?`, 加分页/落盘参数 | `{"asm_text":"mov rax,1\n..."}` | 同上；纯计算，不触 IDA SDK |
+| `extract_block` | `query: int | str`, `labels: str | str[]`（如 `"L7"` / `"L7,L8"` / `["L7","L8"]`）, `expand_macros?: bool` | `{"query":"main","labels":"L7,L8,L9"}` | `{name, ea, labels, map, text}`：`text` = 头部行（`#SZ1/#K/#P/#J/#f`）+ 仅所求块的原文行；`map` 为所求标签→块首地址。标签不存在时返回 `{error, available}` |
+
+分页/落盘参数（compress_* 三工具均有，优先级 `out_file` > 分页 > 默认全文）：
+
+- `line_offset?: int`（默认 0）、`line_limit?: int`：按行切片，响应附加 `line_offset`/`line_total`；第 0 页含 `#SZ1/#K/#P` 头部
+- `out_file?: str`：全文写盘（不受 120,000 字符截断限制），相对路径落到 `%TEMP%/ida_mcp_out/`，返回 `{name, ea, level, stats, file, chars}`，不回传 `compressed`
+- `expand_macros?: bool`：内联展开全部 `#P` 序列宏（输出无宏定义/引用）
+- `with_map?: bool`：附带 Ln 标签 → 块首地址映射。内联返回时加 `map` 字段（`{"L0":"0x..",...}`）；`out_file` 落盘时写 sidecar `<out_file>.map.json` 并返回 `map_file`。函数内直接跳转目标恒渲染为 Ln 标签（含 IDA 已命名 `loc_xxx` 目标），map 与压缩文本标签一一对应
+
+`extract_block` 说明：重跑确定性 ultra 压缩（标签按地址序分配，与 `compress_function` 输出一致）后按标签切片，用于给块分析子代理准备分片 prompt，替代手工切分完整压缩文本。
+
+返回约定：
+
+- 默认：`{name, ea, level, stats, truncated, compressed}`；`compressed` 恒排最后，显示截断时 `stats`（`{orig, out, elim, ratio}`）仍可读；超过 120,000 字符截断并置 `truncated=true`
+- 压缩级别：`safe`（仅字典）、`full`（+保守死代码消除）、`max`（+nop/融合）、`ultra`（默认，全局固定表 + 帧消隐 `#f=N` + 宏 `#P` + 常量池 `#K`）
+- `arch=auto`：IDA 侧工具按 IDB `procname`+位宽判定，`compress_text` 按寄存器/助记符启发式判定
+- 压缩格式（`#SZ1` 头部、`#K` 常量池、`#P` 序列宏、融合行）的完整解码规则见 `instructor/LLM_INSTRUCTOR.md`
 
 ### 4.4 Modeling Tools
 

@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 from . import registry
 from .config import (
+    ensure_loopback_no_proxy,
     get_http_bind_host,
     get_gateway_internal_host,
     get_gateway_internal_port,
@@ -23,6 +24,9 @@ from .config import (
 )
 from .proxy._state import choose_port, get_instances, is_registered_port, is_valid_port
 from .errors import error_payload
+
+# Direct instance calls from the CLI are loopback-only; bypass any system proxy.
+ensure_loopback_no_proxy()
 
 
 def gateway_status_payload() -> dict[str, Any]:
