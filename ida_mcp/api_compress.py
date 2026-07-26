@@ -5,6 +5,7 @@ Provides tools:
     - compress_range      compress an address range into SEMZ DSL text
     - compress_text       compress raw assembly/trace text into SEMZ DSL text
     - extract_block       extract specific blocks (by Ln label) from a function
+    - disasm_text         raw IDA disassembly as plain text (no SEMZ encoding)
 """
 from __future__ import annotations
 
@@ -40,6 +41,14 @@ except ImportError:
 
 _LEVELS = ("safe", "full", "max", "ultra")
 _MAX_OUTPUT = 120_000
+
+_HINT = (
+    "SEMZ is compressed disassembly for scanning/transfer. "
+    "Use decompile for semantics on normal code; on obfuscated code (VMP/OLLVM) "
+    "decompiler output may fail or mislead — trust the disassembly level (disasm/SEMZ). "
+    "Need raw disassembly text without SEMZ decoding: use disasm_text. "
+    "Decode manual: MCP resource ida://semz/manual or instructor/LLM_INSTRUCTOR.md."
+)
 
 
 def _detect_arch() -> str:
@@ -148,6 +157,58 @@ def _expand_macros(text: str) -> str:
     return "\n".join(kept) + "\n"
 
 
+def _resolve_macro_lines(macros: dict) -> dict:
+    """把每个宏体迭代解析为纯指令序列（嵌套引用展开，上限 16 轮）。"""
+    resolved = {name: list(body) for name, body in macros.items()}
+    for _ in range(16):
+        changed = False
+        for name in resolved:
+            out: List[str] = []
+            for ln in resolved[name]:
+                s = ln.strip()
+                if _MACRO_REF_RE.fullmatch(s) and s in resolved:
+                    out.extend(resolved[s])
+                    changed = True
+                else:
+                    out.append(ln)
+            resolved[name] = out
+        if not changed:
+            break
+    return resolved
+
+
+def _annotate_macros(text: str) -> str:
+    """annotate 模式：保留 #P 定义/引用行，在宏引用行尾追加展开注释。
+
+    形如 `P0  ; = <insn>; <insn>; ...`；宏体嵌套引用先迭代解析为纯指令序列。
+    """
+    macros: dict = {}
+    for ln in text.splitlines():
+        m = _MACRO_DEF_RE.match(ln)
+        if m:
+            macros[m.group(1)] = m.group(2).split(";")
+    if not macros:
+        return text
+    resolved = _resolve_macro_lines(macros)
+    out: List[str] = []
+    for ln in text.splitlines():
+        s = ln.strip()
+        if _MACRO_REF_RE.fullmatch(s) and s in resolved:
+            out.append(f"{ln}  ; = {'; '.join(resolved[s])}")
+        else:
+            out.append(ln)
+    return "\n".join(out) + "\n"
+
+
+def _apply_macro_mode(text: str, expand_macros) -> str:
+    """expand_macros=False 原样 / True 全展开 / "annotate" 引用行尾注释。"""
+    if expand_macros == "annotate":
+        return _annotate_macros(text)
+    if expand_macros:
+        return _expand_macros(text)
+    return text
+
+
 def _collect_heads(start: int, end: int) -> List[dict]:
     """idautils.Heads + generate_disasm_line 取 {ea,text,comment}（对齐 api_analysis.disasm 模式）。"""
     instructions: List[dict] = []
@@ -203,19 +264,20 @@ def _pack(
     line_offset: int = 0,
     line_limit: Optional[int] = None,
     out_file: Optional[str] = None,
-    expand_macros: bool = False,
+    expand_macros: Union[bool, str] = False,
     with_map: bool = False,
 ) -> dict:
     """装配返回：out_file 落盘 > 行分页 > 全文（默认）。
 
     compressed 恒放最后：客户端对超长响应做显示截断时，stats 等元信息仍可读。
+    hint（定位提示）随响应返回，写在 compressed 之前；不落盘、不拼进文本。
     落盘文件是临时产物——调用方应在任务结束经用户确认后删除。
-    expand_macros=true 时 #P 宏全部内联展开（stats 仍描述压缩形态）。
+    expand_macros=true 时 #P 宏全部内联展开（stats 仍描述压缩形态）；
+    expand_macros="annotate" 时保留宏并在引用行尾追加展开注释。
     with_map=true 时附带 Ln 标签 → 块首地址映射（落盘时写 <out_file>.map.json）。
     """
     text = result["text"]
-    if expand_macros:
-        text = _expand_macros(text)
+    text = _apply_macro_mode(text, expand_macros)
     stats = result["stats"]
     payload: dict = {
         "name": name,
@@ -227,6 +289,8 @@ def _pack(
             "elim": stats["elim"],
             "ratio": stats["ratio"],
         },
+        # 定位提示恒在 compressed 之前（仅随响应返回，不写落盘文件/不拼进文本）
+        "hint": _HINT,
     }
 
     if out_file:
@@ -282,13 +346,14 @@ def compress_function(
     line_offset: Annotated[int, "Paging: start line of the compressed text (default 0)"] = 0,
     line_limit: Annotated[Optional[int], "Paging: max lines to return; omit for full text"] = None,
     out_file: Annotated[Optional[str], "Write full output to a file instead of returning inline (relative paths go to %TEMP%/ida_mcp_out/)"] = None,
-    expand_macros: Annotated[bool, "Inline-expand all #P sequence macros for readability (no macro definitions/references in output)"] = False,
+    expand_macros: Annotated[Union[bool, str], "Inline-expand #P sequence macros (true: fully expanded output with no macro definitions/references; 'annotate': keep macros and append an expansion comment on each reference line)"] = False,
     with_map: Annotated[bool, "Include Ln label -> block start address map (inline 'map' field, or <out_file>.map.json sidecar when writing to file)"] = False,
 ) -> dict:
-    """Compress a function into SEMZ DSL text (default level: ultra).
+    """Compress a function's disassembly into SEMZ DSL text — compact for bulk scanning/transfer; also the right choice when decompile fails or misleads on obfuscated code (VMP/OLLVM) (default level: ultra).
 
-    For understanding semantics prefer decompile/disasm first; this tool is for
-    bulk viewing and transfer-size compression. Large output: page with
+    On normal code decompile is fastest for semantics; when decompile fails or
+    misleads (obfuscated/virtualized code), trust this disassembly-level view.
+    Large output: page with
     line_offset/line_limit, or spill to out_file (delete after user confirms).
     In-function direct branch targets are always rendered as Ln labels.
     """
@@ -334,13 +399,14 @@ def compress_range(
     line_offset: Annotated[int, "Paging: start line of the compressed text (default 0)"] = 0,
     line_limit: Annotated[Optional[int], "Paging: max lines to return; omit for full text"] = None,
     out_file: Annotated[Optional[str], "Write full output to a file instead of returning inline (relative paths go to %TEMP%/ida_mcp_out/)"] = None,
-    expand_macros: Annotated[bool, "Inline-expand all #P sequence macros for readability (no macro definitions/references in output)"] = False,
+    expand_macros: Annotated[Union[bool, str], "Inline-expand #P sequence macros (true: fully expanded output with no macro definitions/references; 'annotate': keep macros and append an expansion comment on each reference line)"] = False,
     with_map: Annotated[bool, "Include Ln label -> block start address map (inline 'map' field, or <out_file>.map.json sidecar when writing to file)"] = False,
 ) -> dict:
-    """Linear-disassemble an address range and compress it into SEMZ DSL text (default level: ultra).
+    """Linear-disassemble an address range and compress it into SEMZ DSL text — compact for bulk scanning/transfer; reliable when decompile fails or misleads on obfuscated code (VMP/OLLVM) (default level: ultra).
 
-    For understanding semantics prefer decompile/disasm first; this tool is for
-    bulk viewing and transfer-size compression. Large output: page with
+    On normal code decompile is fastest for semantics; when decompile fails or
+    misleads (obfuscated/virtualized code), trust this disassembly-level view.
+    Large output: page with
     line_offset/line_limit, or spill to out_file (delete after user confirms).
     """
     if level not in _LEVELS:
@@ -390,10 +456,10 @@ def compress_text(
     line_offset: Annotated[int, "Paging: start line of the compressed text (default 0)"] = 0,
     line_limit: Annotated[Optional[int], "Paging: max lines to return; omit for full text"] = None,
     out_file: Annotated[Optional[str], "Write full output to a file instead of returning inline (relative paths go to %TEMP%/ida_mcp_out/)"] = None,
-    expand_macros: Annotated[bool, "Inline-expand all #P sequence macros for readability (no macro definitions/references in output)"] = False,
+    expand_macros: Annotated[Union[bool, str], "Inline-expand #P sequence macros (true: fully expanded output with no macro definitions/references; 'annotate': keep macros and append an expansion comment on each reference line)"] = False,
     with_map: Annotated[bool, "Include Ln label -> block start address map (inline 'map' field, or <out_file>.map.json sidecar when writing to file)"] = False,
 ) -> dict:
-    """Compress raw assembly or trace text into SEMZ DSL text (pure computation, no IDA SDK; default level: ultra).
+    """Compress raw assembly or trace text into SEMZ DSL text — compact for bulk scanning/transfer and for inspecting code where decompile fails or misleads (pure computation, no IDA SDK; default level: ultra).
 
     Large output: page with line_offset/line_limit, or spill to out_file
     (delete after user confirms).
@@ -420,9 +486,9 @@ def compress_text(
 def extract_block(
     query: Annotated[Union[int, str], "Function address or symbol name"],
     labels: Annotated[Union[str, List[str]], "Block label(s) to extract: \"L7\", \"L7,L8\", or [\"L7\",\"L8\"]"],
-    expand_macros: Annotated[bool, "Inline-expand #P sequence macros in the returned block text"] = False,
+    expand_macros: Annotated[Union[bool, str], "Inline-expand #P sequence macros in the returned block text (true: full expansion; 'annotate': keep macros and append expansion comments)"] = False,
 ) -> dict:
-    """Extract specific basic blocks (by Ln label) from a function's SEMZ ultra compression.
+    """Extract specific basic blocks (by Ln label) from a function's SEMZ ultra compression — disassembly-level shards for block analysis when decompile fails or misleads.
 
     Re-runs the deterministic ultra compression (labels are assigned in address
     order, identical to compress_function output) and returns the header lines
@@ -468,8 +534,7 @@ def extract_block(
         return extracted
 
     text = _format_blocks(extracted, with_header=True)
-    if expand_macros:
-        text = _expand_macros(text)
+    text = _apply_macro_mode(text, expand_macros)
     full_map = _map_payload(result)
     return {
         "name": info["name"],
@@ -478,3 +543,127 @@ def extract_block(
         "map": {lb: full_map[lb] for lb in label_list if lb in full_map},
         "text": text,
     }
+
+
+# ============================================================================
+# disasm_text：IDA 原始反汇编纯文本（无 SEMZ 编码）
+# ============================================================================
+
+def _format_disasm_lines(instructions: List[dict]) -> str:
+    """{ea,text,comment} → `0x<ea>: <text>` 行（有 comment 追加 ` ; <comment>`）。"""
+    lines: List[str] = []
+    for ins in instructions:
+        line = f"{hex_addr(ins['ea'])}: {ins['text']}"
+        if ins.get("comment"):
+            line += f" ; {ins['comment']}"
+        lines.append(line)
+    return "\n".join(lines) + "\n"
+
+
+def _pack_plain(
+    text: str,
+    name: str,
+    ea,
+    count: int,
+    line_offset: int = 0,
+    line_limit: Optional[int] = None,
+    out_file: Optional[str] = None,
+) -> dict:
+    """disasm_text 装配：与 _pack 同约定（out_file 落盘 > 行分页 > 全文）。
+
+    大文本字段 disasm 恒放最后（对齐 compressed 约定：显示截断时元信息仍可读）。
+    落盘文件是临时产物——调用方应在任务结束经用户确认后删除。
+    """
+    payload: dict = {"name": name, "ea": ea, "instructions": count}
+
+    if out_file:
+        # 落盘：写全文（不受 _MAX_OUTPUT 截断），不回传 disasm
+        path = out_file
+        if not os.path.isabs(path):
+            path = os.path.join(tempfile.gettempdir(), "ida_mcp_out", path)
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+        payload["file"] = path
+        payload["chars"] = len(text)
+        return payload
+
+    if line_limit is not None or line_offset:
+        # 分级阅读：按行切片
+        lines = text.splitlines()
+        total = len(lines)
+        offset = max(0, int(line_offset))
+        end = None if line_limit is None else offset + max(1, int(line_limit))
+        chunk = lines[offset:end]
+        payload["truncated"] = False
+        payload["line_offset"] = offset
+        payload["line_total"] = total
+        payload["disasm"] = "\n".join(chunk) + "\n" if chunk else ""
+        return payload
+
+    truncated = False
+    if len(text) > _MAX_OUTPUT:
+        text = text[:_MAX_OUTPUT]
+        truncated = True
+    payload["truncated"] = truncated
+    payload["disasm"] = text
+    return payload
+
+
+@tool
+@idaread
+def disasm_text(
+    query: Annotated[Optional[Union[int, str]], "Function address or symbol name; omit when using start/end"] = None,
+    start: Annotated[Optional[Union[int, str]], "Range start address (requires end; ignored when query is given)"] = None,
+    end: Annotated[Optional[Union[int, str]], "Range end address (exclusive, requires start)"] = None,
+    line_offset: Annotated[int, "Paging: start line of the output text (default 0)"] = 0,
+    line_limit: Annotated[Optional[int], "Paging: max lines to return; omit for full text"] = None,
+    out_file: Annotated[Optional[str], "Write full output to a file instead of returning inline (relative paths go to %TEMP%/ida_mcp_out/)"] = None,
+) -> dict:
+    """Return IDA's raw disassembly as plain text — the trusted ground truth on obfuscated/virtualized code (VMP/OLLVM) where decompile fails or misleads; no SEMZ decoding needed.
+
+    One line per instruction: `0x<ea>: <text>` (plus ` ; <comment>` when present),
+    exactly as IDA renders it — no SEMZ encoding, readable by any LLM agent.
+    On obfuscated code pseudo-C may look plausible while being wrong; trust this
+    disassembly-level view. For semantics on normal code decompile is fastest;
+    for transfer-size compression use compress_function/compress_range.
+    Pass either query (function) or start+end (range). Large output: page with
+    line_offset/line_limit, or spill to out_file (delete after user confirms).
+    """
+    if idaapi is None:
+        return {"error": "IDA SDK not available"}
+    wait_for_auto_analysis()
+
+    if query is not None:
+        from .api_analysis import _resolve_function
+
+        info = _resolve_function(query)
+        if info.get("error"):
+            return info
+        start_ea = info["start_ea"]
+        end_ea = info["end_ea"]
+        name = info["name"] or "?"
+    else:
+        if start is None or end is None:
+            return {"error": "pass either query (function) or start+end (range)"}
+        parsed_start = parse_address(start)
+        if not parsed_start["ok"] or parsed_start["value"] is None:
+            return {"error": "invalid start"}
+        parsed_end = parse_address(end)
+        if not parsed_end["ok"] or parsed_end["value"] is None:
+            return {"error": "invalid end"}
+        start_ea = int(parsed_start["value"])
+        end_ea = int(parsed_end["value"])
+        if end_ea <= start_ea:
+            return {"error": "end must be greater than start"}
+        name = f"{hex_addr(start_ea)}-{hex_addr(end_ea)}"
+
+    instructions = _collect_heads(start_ea, end_ea)
+    if not instructions:
+        return {"error": "no instructions", "query": query} if query is not None else {"error": "no instructions"}
+
+    text = _format_disasm_lines(instructions)
+    return _pack_plain(text, name, hex_addr(start_ea), len(instructions),
+                       line_offset=line_offset, line_limit=line_limit, out_file=out_file)

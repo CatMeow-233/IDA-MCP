@@ -1,4 +1,3 @@
-KIMI K3最新力作
 # IDA-MCP
 
 IDA-MCP is an IDA Pro plugin that exposes IDA analysis, database modification,
@@ -50,17 +49,36 @@ elimination (`#ELIM`).
   and return the header lines plus only the requested blocks (`"L7"` /
   `"L7,L8"` / list), for feeding single blocks to sub-agents without
   hand-cutting the full text.
+- `disasm_text(query | start+end)` — plain IDA disassembly text
+  (`0x<ea>: <text>` lines, zero SEMZ encoding) for a function or an explicit
+  address range, with the same paging (`line_offset`/`line_limit`) and
+  `out_file` spill conventions. The no-decoding fallback for agents that
+  should not parse SEMZ, and ground truth on obfuscated code.
 
 In-function direct branch targets are always rendered as `Ln` labels
 (including IDA-named `loc_xxx` targets). Pass `with_map=true` to any
 `compress_*` tool to get the label→address map (`{"L0":"0x..",...}` inline,
-or an `<out_file>.map.json` sidecar when spilling to disk).
+or an `<out_file>.map.json` sidecar when spilling to disk). Pass
+`expand_macros=true` to inline-expand every `#P` sequence macro (longer, but
+no mental expansion), or `expand_macros="annotate"` to keep the `#P`
+definitions and reference lines while appending each expansion as an
+end-of-line `; = ...` comment.
+
+Tool choice is scenario-based, with no default priority: `decompile` is
+fastest for semantics on normal code, but on obfuscated/virtualized code
+(VMP, OLLVM flattening) Hex-Rays output can fail or **mislead** — basic
+blocks lifted from obfuscated control flow can read like normal logic in
+pseudo-C. Trust the disassembly level (`disasm`, `disasm_text`, or SEMZ) in
+that scenario; SEMZ itself is for bulk scanning and transfer-size
+compression.
 
 **LLM instructor**: `instructor/LLM_INSTRUCTOR.md` is the SEMZ decoding manual
 (ARM64/x86/x64 fixed tables, ultra syntax, work rules) plus a ready-to-use
 system-prompt template — attach it (or its 10-line quick card) whenever you
 feed compressed text to a model; the fixed dictionaries deliberately never
-travel with the output, which is where the compression ratio comes from.
+travel with the output, which is where the compression ratio comes from. The
+quick card is also served as the MCP resource `ida://semz/manual`, so any
+agent holding SEMZ output can fetch the decoding rules on demand.
 
 `level` selects the aggressiveness: `safe` (dictionaries only, no elimination),
 `full` (adds conservative liveness-based dead-code elimination with a deletion
@@ -68,8 +86,12 @@ log), `max` (adds nop/padding removal and cmp/test+jcc fusion, e.g.
 `cjz L4: t a, a`), and `ultra` (the default: globally fixed mnemonic/register
 tables with no `#MN`/`#RG` headers, always-on fusion `gz L5: t a` and DCE,
 zeroing/test idioms, multi-push folding, standard stack-frame elision `#f=N`,
-and constants/macros pooled only when repeated at least twice). All levels return `{name, ea, level, stats, truncated, compressed}`
-(`compressed` last, so display truncation never hides the stats); inline output
+and constants/macros pooled only when repeated at least twice). Ultra output
+always carries a factual `#summary` header line right after `#SZ1`
+(block/macro/const counts, indirect-jump count with `(indirect)` marker,
+frame size). All levels return `{name, ea, level, stats, truncated, hint, compressed}`
+(`hint` is a short tool-selection note for the calling agent; `compressed`
+last, so display truncation never hides the stats); inline output
 longer than 120,000 characters is truncated. Large outputs can instead be paged
 with `line_offset`/`line_limit` (line-granularity slices, response adds
 `line_offset`/`line_total`) or spilled to disk with `out_file` (relative paths
@@ -78,7 +100,7 @@ land in `%TEMP%/ida_mcp_out/`; response returns `{..., file, chars}` without
 confirms the task is done.
 
 ARM64 / x86 / x64 are all first-class targets (three architectures): all three
-tools take an optional `arch` argument (`auto`/`x86`/`x64`/`arm64`, default
+`compress_*` tools take an optional `arch` argument (`auto`/`x86`/`x64`/`arm64`, default
 `auto` — heuristics on register names/`#imm`/mnemonics/`dword`/`qword` for
 text, IDB `procname`+bitness for IDA-side tools). ARM64 gets its own fixed
 ultra table (`q D,E,[S-50]!` = stp x29,x30, `geq L2: f a,10` = cmp+b.eq

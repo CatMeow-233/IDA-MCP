@@ -442,7 +442,8 @@ def emit_ultra(
 ) -> str:
     """装配 ultra 文本。
 
-    头部：`#SZ1 fn=.. arch=.. at=0x.. o=.. u=.. e=.. r=..%`，按需追加
+    头部：`#SZ1 fn=.. arch=.. at=0x.. o=.. u=.. e=.. r=..%`，随后恒出一行
+    `#summary`（blocks/macros/consts/jt/frame 事实计数），按需追加
     `#K`（重复≥2 常量池）/ `#P`（重复≥2 序列宏）/ `#J`（跳转表）/ `#f=N`（标准帧消隐）。
     **不**输出 #MN/#RG（字典全局固定）。
 
@@ -470,6 +471,17 @@ def emit_ultra(
                 r=ratio_str,
             )
         ]
+        # 事实性摘要行：块/宏/常量计数、间接跳转数、帧大小（无语义描述）
+        jt = maps.get("jt") or []
+        summary = (
+            f"#summary blocks={len(blocks)}"
+            f" macros={len(maps.get('macros') or [])}"
+            f" consts={len(maps.get('pool') or [])}"
+            f" jt={len(jt)}{'(indirect)' if jt else ''}"
+        )
+        if maps.get("frame") is not None:
+            summary += f" frame={int(maps['frame'])}"
+        out_lines.append(summary)
         pool = maps.get("pool") or []
         if pool:
             out_lines.append("#K " + " ".join(f"{k}={tok}" for k, tok in pool))

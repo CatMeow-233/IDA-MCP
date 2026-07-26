@@ -636,3 +636,42 @@ def memory_resource(addr: str, size: int = 16) -> str:
         bytes=first.get("bytes"),
         hex=first.get("hex"),
     )
+
+
+# SEMZ 解码速查手册（嵌为常量：插件安装后 instructor/ 目录不一定存在；
+# 完整版见仓库 instructor/LLM_INSTRUCTOR.md）
+_SEMZ_MANUAL = """\
+SEMZ Ultra 速查手册（IDA-MCP compress_* 输出格式；完整版：instructor/LLM_INSTRUCTOR.md）
+
+【定位】三者平等开放，按场景分流：
+  正常代码理解语义 → decompile 最快（Hex-Rays 伪 C）。
+  混淆/虚拟化代码（VMP、OLLVM 控制流扁平化等）、decompile 失败或输出可疑
+    → 信任反汇编层：disasm 或 SEMZ。被混淆的基本块反编译出来看着像正常逻辑，
+    伪 C 会产生误导性输出，信了就被骗。
+  大范围扫读、批量传输 → SEMZ（compress_function / compress_range / compress_text）。
+  看不懂 SEMZ 或需要原始汇编原文 → disasm_text（`0x<ea>: <text>` 纯文本逐行输出，
+    同属可信反汇编层——混淆代码下警惕伪 C 误导的纪律不变）。
+  不要逐行精读 ultra 输出；宏读不动用 expand_macros=true（全展开）或 "annotate"（引用行尾注释）。
+
+【头部行】（# 开头，按需出现）
+  #SZ1 fn=<名> arch=<arm64|x64|x86> at=0x<入口> o=<原指令数> u=<输出指令数> e=<死代码消除数> r=<字符比%>
+  #summary blocks=<块数> macros=<#P 宏数> consts=<#K 常量数> jt=<间接跳转数>[(indirect)] frame=<帧大小>
+  #K K0=<常量> …      常量池：重复≥2 的常量/符号，正文用 Kn 引用
+  #P P0=<指令;指令;…> 序列宏：重复≥2 次的指令序列，正文整行 Pn 引用
+  #J L7: L12,L9       跳转表：所在块 → 目标标签（unresolved = IDA 也未解析）
+  #f=70               标准帧（序言/尾声）已消隐，帧大小 hex
+
+【核心解码】（ARM64；x64/x86 见完整手册 §6）
+  寄存器：a..z=x0..x25，A..E=x26..x30；S=sp，Z=xzr，P=pc；w 前缀=32 位视图（wa=w0）
+  助记符：m=mov l=ldr s=str p=ldp q=stp c=bl r=ret j=b f=cmp t=tst d=adrp k=movk z=movz
+  融合跳转：g<cc> Ln: f|t <ops> = cmp/tst + b.<cc>；独立条件跳写作 j<cc> Ln
+  标签：Ln: 是基本块标签（L0=入口），不是地址；要地址映射加 with_map=true
+  数制：hex 无 0x 前缀且以数字开头（0ff=0xff）；内存 [S+40]=[sp,#0x40]，预索引 [S-50]!，后索引 [S]+50
+  e=n：n 条无副作用死代码已删，语义无损；不要编造被删指令内容
+"""
+
+
+@resource(uri="ida://semz/manual")
+def semz_manual_resource() -> str:
+    """SEMZ 解码速查（纯静态文本，不触 IDA，故不加 @idaread）。"""
+    return _SEMZ_MANUAL

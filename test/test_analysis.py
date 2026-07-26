@@ -120,6 +120,39 @@ class TestDisasm:
         assert "error" in result[0]
 
 
+class TestDisasmText:
+    """disasm_text：原始汇编纯文本（无 SEMZ 编码）。"""
+
+    def test_disasm_text_by_function(self, tool_caller, first_function_name, first_function_address):
+        """按函数名取纯文本：`0x<ea>: <text>` 逐行，无 SEMZ 头部。"""
+        result = tool_caller("disasm_text", {"query": first_function_name})
+
+        assert isinstance(result, dict)
+        if "error" not in result:
+            assert result["instructions"] > 0
+            lines = result["disasm"].splitlines()
+            assert len(lines) == result["instructions"]
+            assert lines[0].startswith(hex(first_function_address) + ": "), lines[0]
+            assert not any(ln.startswith("#") for ln in lines)
+
+    def test_disasm_text_by_range_and_paging(self, tool_caller, first_function_address):
+        """按范围取 + 分页 line_total 自洽。"""
+        start = first_function_address
+        end = start + 0x40
+        result = tool_caller("disasm_text", {"start": hex(start), "end": hex(end)})
+        if "error" not in result:
+            paged = tool_caller("disasm_text", {
+                "start": hex(start), "end": hex(end), "line_limit": 2,
+            })
+            assert paged["line_total"] == result["instructions"]
+            assert paged["disasm"].splitlines() == result["disasm"].splitlines()[:2]
+
+    def test_disasm_text_requires_query_or_range(self, tool_caller):
+        """query 与 start+end 都不给时报错。"""
+        result = tool_caller("disasm_text", {})
+        assert isinstance(result, dict) and "error" in result
+
+
 class TestLinearDisasm:
     """Linear disassembly tests."""
 

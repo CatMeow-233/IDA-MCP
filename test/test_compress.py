@@ -1513,3 +1513,172 @@ def test_extract_blocks_helper():
     frag = format_blocks(ex)
     assert "L0:" in frag and "L2:" in frag
     assert not any(ln.strip() == "L1:" for ln in frag.splitlines())
+
+
+# ============================================================================
+# SEMZ 可用性改进：annotate 宏模式 / hint 字段 / #summary 行 /
+# ida://semz/manual 资源 / 工具 description 定位引导
+# ============================================================================
+
+def test_expand_macros_annotate():
+    """expand_macros="annotate"：#P 定义/引用行保留，引用行尾带 `; =` 展开注释。"""
+    asm = ("mov rax,[rbx]\nadd rax,4\nmov [rbx],rax\n" * 3) + "retn"
+    r = _api_compress_text(asm, level="ultra", arch="x64", expand_macros="annotate")
+    text = r["compressed"]
+    assert "#P P0=" in text, text  # 定义行保留
+    refs = [
+        ln for ln in text.splitlines()
+        if ln.strip().startswith("P0") and not ln.startswith("#")
+    ]
+    assert refs, text
+    for ln in refs:
+        assert "; = " in ln, ln           # 行尾展开注释
+        assert "m a,[b]" in ln, ln        # 注释为展开后的纯指令序列
+    # 默认 False 与 True 行为不变
+    default = _api_compress_text(asm, level="ultra", arch="x64")
+    assert "#P P0=" in default["compressed"]
+    assert "; = " not in default["compressed"]
+    flat = _api_compress_text(asm, level="ultra", arch="x64", expand_macros=True)
+    assert "#P " not in flat["compressed"]
+
+
+def test_hint_field_present_and_ordered(tmp_path):
+    """hint 随响应返回、排在 compressed 之前；compressed 恒最后；落盘文件不含 hint。"""
+    r = _api_compress_text(CORPUS_A, level="ultra", arch="x64")
+    assert "hint" in r
+    assert "decompile" in r["hint"] and "disasm" in r["hint"]
+    keys = list(r)
+    assert keys.index("hint") < keys.index("compressed")
+    assert keys[-1] == "compressed"
+    # 分页分支同样成立
+    p = _api_compress_text(CORPUS_A, level="ultra", arch="x64", line_limit=3)
+    assert "hint" in p and list(p)[-1] == "compressed"
+    # 落盘：hint 在响应里，但不写进文件
+    target = tmp_path / "hint.semz.txt"
+    rf = _api_compress_text(CORPUS_A, level="ultra", arch="x64", out_file=str(target))
+    assert "hint" in rf
+    written = target.read_text(encoding="utf-8")
+    assert "SEMZ is compressed disassembly" not in written
+
+
+def test_ultra_summary_line():
+    """ultra 头部第二行恒为 #summary，含 blocks=/macros=/consts=/jt= 字段。"""
+    text = compress_text(CORPUS_A, level="ultra", arch="x64")["text"]
+    lines = text.splitlines()
+    assert lines[0].startswith("#SZ1 ")
+    assert lines[1].startswith("#summary "), text
+    for field in ("blocks=", "macros=", "consts=", "jt=0"):
+        assert field in lines[1], lines[1]
+    # 帧消隐语料带 frame 字段（语料 E #f=40）
+    e_lines = compress_text(CORPUS_E, level="ultra")["text"].splitlines()
+    assert e_lines[1].startswith("#summary ") and "frame=" in e_lines[1], e_lines[1]
+    # 无帧语料省略 frame 字段（无标准序言的散指令）
+    bare = compress_text("mov eax,1\nretn", level="ultra", arch="x86")["text"]
+    assert "frame=" not in bare.splitlines()[1], bare
+
+
+def test_ultra_summary_jt_indirect():
+    """含间接跳转（br x8）的语料 #summary jt 字段非 0 且标 (indirect)。"""
+    insns = [
+        {"ea": 0x0, "text": "cmp x0, 2"},
+        {"ea": 0x4, "text": "b.eq 0x20"},
+        {"ea": 0x8, "text": "br x8"},
+        {"ea": 0x20, "text": "ret"},
+    ]
+    r = compress_insns(
+        insns, level="ultra", arch="arm64",
+        jt_resolver=lambda ea: [0x20] if ea == 0x8 else None,
+    )
+    summary = r["text"].splitlines()[1]
+    assert summary.startswith("#summary "), r["text"]
+    assert "jt=1(indirect)" in summary, summary
+
+
+def test_semz_manual_resource():
+    """ida://semz/manual 资源返回速查文本，含定位与解码关键 token。"""
+    from ida_mcp.api_resources import semz_manual_resource
+
+    text = semz_manual_resource()
+    for token in ("decompile", "disasm", "compress", "#SZ1", "#K", "#P", "#J", "#f", "g<cc>", "Ln"):
+        assert token in text, token
+
+
+def test_tool_descriptions_have_positioning():
+    """MCP 工具 description（docstring 首行）含定位引导。"""
+    import ida_mcp.api_analysis  # noqa: F401
+    import ida_mcp.api_compress  # noqa: F401
+    from ida_mcp.rpc import get_tool_specs
+
+    specs = get_tool_specs()
+    for name in ("compress_function", "compress_range", "compress_text", "extract_block"):
+        assert "decompile" in specs[name].description, (name, specs[name].description)
+    assert "semantics" in specs["decompile"].description
+    assert "instruction" in specs["disasm"].description
+    # disasm_text：混淆代码地面真相 + 警惕伪 C 误导的口径
+    desc = specs["disasm_text"].description
+    assert "obfuscated" in desc and "mislead" in desc, desc
+    assert "decompile" in desc, desc
+
+
+# ============================================================================
+# disasm_text：原始汇编纯文本（纯 Python 辅助层可测；IDA 路径走 gateway 套件）
+# ============================================================================
+
+from ida_mcp.api_compress import _format_disasm_lines, _pack_plain  # noqa: E402
+
+_DISASM_SAMPLE_INSNS = [
+    {"ea": 0x401000, "text": "push rbp", "comment": None},
+    {"ea": 0x401001, "text": "mov rbp, rsp", "comment": None},
+    {"ea": 0x401004, "text": "call 0x402000", "comment": "sub_402000"},
+    {"ea": 0x401009, "text": "retn", "comment": None},
+]
+
+
+def test_disasm_text_format_lines():
+    """行格式 `0x<ea>: <text>`，有 comment 追加 ` ; <comment>`；无任何 SEMZ 头部。"""
+    text = _format_disasm_lines(_DISASM_SAMPLE_INSNS)
+    lines = text.splitlines()
+    assert lines[0] == "0x401000: push rbp"
+    assert lines[2] == "0x401004: call 0x402000 ; sub_402000"
+    assert len(lines) == 4 and text.endswith("\n")
+    assert not any(ln.startswith("#") for ln in lines), text  # 无 #SZ1/#K/#P 等 SEMZ 头
+
+
+def test_disasm_text_registered():
+    """disasm_text 经 @tool 注册，签名为 query 或 start+end 二选一。"""
+    import inspect
+
+    import ida_mcp.api_compress as ac
+    from ida_mcp.rpc import get_tool_specs
+
+    assert "disasm_text" in get_tool_specs()
+    params = inspect.signature(ac.disasm_text).parameters
+    for name in ("query", "start", "end", "line_offset", "line_limit", "out_file"):
+        assert name in params, name
+    assert params["query"].default is None
+
+
+def test_disasm_text_pack_paging():
+    """分页：line_total 自洽、切片正确、disasm 恒最后；无 compress 专有字段。"""
+    text = _format_disasm_lines(_DISASM_SAMPLE_INSNS)
+    full = _pack_plain(text, "fn", "0x401000", 4)
+    assert list(full)[-1] == "disasm"
+    assert full["disasm"] == text and full["truncated"] is False
+    assert "stats" not in full and "level" not in full and "compressed" not in full
+
+    p1 = _pack_plain(text, "fn", "0x401000", 4, line_limit=2)
+    assert p1["line_total"] == 4 and p1["line_offset"] == 0
+    assert p1["disasm"].splitlines() == text.splitlines()[:2]
+    p2 = _pack_plain(text, "fn", "0x401000", 4, line_offset=2, line_limit=2)
+    assert p2["line_offset"] == 2
+    assert p2["disasm"].splitlines() == text.splitlines()[2:4]
+
+
+def test_disasm_text_pack_out_file(tmp_path):
+    """落盘与内联一致；落盘不回传 disasm。"""
+    text = _format_disasm_lines(_DISASM_SAMPLE_INSNS)
+    target = tmp_path / "fn.disasm.txt"
+    r = _pack_plain(text, "fn", "0x401000", 4, out_file=str(target))
+    assert "disasm" not in r
+    assert r["file"] == str(target) and r["chars"] == len(text)
+    assert target.read_text(encoding="utf-8") == text

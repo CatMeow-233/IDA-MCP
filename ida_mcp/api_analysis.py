@@ -282,7 +282,7 @@ def _signature_from_pseudocode(info: dict) -> Optional[str]:
 def decompile(
     addr: Annotated[Union[int, str], "Function address or name (single or comma-separated)"],
 ) -> List[dict]:
-    """Decompile function(s) at given address(es). Requires Hex-Rays."""
+    """Decompile function(s) to pseudo-C. Requires Hex-Rays — best for semantics on normal code; may fail or mislead on obfuscated/virtualized code, then use disasm or compress_function."""
     wait_for_auto_analysis()
     # parse address list
     from .utils import normalize_list_input
@@ -335,7 +335,7 @@ def decompile_function(query: Union[int, str]) -> dict:
 def disasm(
     addr: Annotated[Union[int, str], "Function address(es) - single or comma-separated"],
 ) -> List[dict]:
-    """Disassemble function(s) with full details."""
+    """Disassemble function(s) with full instruction detail — reliable when decompile fails or on obfuscated code."""
     wait_for_auto_analysis()
     from .utils import normalize_list_input
     queries = normalize_list_input(addr)

@@ -184,6 +184,7 @@ gateway/control 面的包装错误常见格式：
 | --- | --- | --- | --- |
 | `decompile` | `addr: int | str` | `{"addr":"0x401000,main"}` | `[{query, name, start_ea, end_ea, decompiled, error}]` |
 | `disasm` | `addr: int | str` | `{"addr":"0x401000"}` | `[{query, name, start_ea, end_ea, instructions, error}]`；`instructions` 为 `[{ea, bytes, text, comment}]` |
+| `disasm_text` | `query?: int | str`（函数地址/名）或 `start`+`end`（范围），加分页/落盘参数 | `{"query":"main"}` 或 `{"start":"0xD90","end":"0x26DC"}` | 纯文本反汇编（无 SEMZ 编码）：`{name, ea, instructions, truncated, disasm}`，`disasm` 为 `0x<ea>: <text>` 逐行文本（有注释带 ` ; <comment>`）恒排最后；分页附加 `line_offset`/`line_total`，`out_file` 落盘返回 `{name, ea, instructions, file, chars}`。混淆/虚拟化代码（VMP/OLLVM）下的可信地面真相——伪 C 会失败或误导，信任反汇编层 |
 | `linear_disasm` | `start_address: int | str`, `count?: int` | `{"start_address":"0x401000","count":16}` | `{start_address, count, instructions, truncated?}`；`instructions` 为 `[{ea, bytes, text, is_code, len}]` |
 | `get_callers` | `addr: int | str` | `{"addr":"main"}` | `{query, function, start_ea, end_ea, total, items}`；`items` 为 `[{address, name, call_count, call_sites}]` |
 | `get_callees` | `addr: int | str` | `{"addr":"main"}` | `{query, function, start_ea, end_ea, total, items}`；`items` 为 `[{address, name, call_count, call_sites}]` |
@@ -204,30 +205,31 @@ gateway/control 面的包装错误常见格式：
 
 ### 4.3.1 Compress Tools (SEMZ)
 
-把反汇编压缩为 SEMZ DSL 文本（面向 LLM 的体积压缩；理解语义应优先 `decompile`/`disasm`，详见 `instructor/LLM_INSTRUCTOR.md`）。三工具共用参数与返回约定：
+把反汇编压缩为 SEMZ DSL 文本（面向 LLM 的体积压缩）。场景分流：正常代码理解语义用 `decompile` 最快；混淆/虚拟化代码（VMP/OLLVM）或 decompile 失败/输出可疑时信任反汇编层（`disasm` 或 SEMZ——伪 C 可能误导）；大范围扫读/批量传输用 SEMZ；看不懂 SEMZ 或需要原始汇编原文用 `disasm_text`。解码手册见 MCP resource `ida://semz/manual` 或 `instructor/LLM_INSTRUCTOR.md`。三工具共用参数与返回约定：
 
 | Tool | Parameters | Request Example | Expected Response |
 | --- | --- | --- | --- |
 | `compress_function` | `query: int | str`, `level?: safe\|full\|max\|ultra`, `arch?: auto\|x86\|x64\|arm64`, 加分页/落盘参数 | `{"query":"main","level":"ultra"}` | 见下方返回约定 |
 | `compress_range` | `start: int | str`, `end: int | str`, `level?`, `arch?`, 加分页/落盘参数 | `{"start":"0xD90","end":"0x26DC"}` | 同上 |
 | `compress_text` | `asm_text: str`, `level?`, `arch?`, 加分页/落盘参数 | `{"asm_text":"mov rax,1\n..."}` | 同上；纯计算，不触 IDA SDK |
-| `extract_block` | `query: int | str`, `labels: str | str[]`（如 `"L7"` / `"L7,L8"` / `["L7","L8"]`）, `expand_macros?: bool` | `{"query":"main","labels":"L7,L8,L9"}` | `{name, ea, labels, map, text}`：`text` = 头部行（`#SZ1/#K/#P/#J/#f`）+ 仅所求块的原文行；`map` 为所求标签→块首地址。标签不存在时返回 `{error, available}` |
+| `extract_block` | `query: int | str`, `labels: str | str[]`（如 `"L7"` / `"L7,L8"` / `["L7","L8"]`）, `expand_macros?: bool \| "annotate"` | `{"query":"main","labels":"L7,L8,L9"}` | `{name, ea, labels, map, text}`：`text` = 头部行（`#SZ1/#summary/#K/#P/#J/#f`）+ 仅所求块的原文行；`map` 为所求标签→块首地址。标签不存在时返回 `{error, available}` |
 
 分页/落盘参数（compress_* 三工具均有，优先级 `out_file` > 分页 > 默认全文）：
 
 - `line_offset?: int`（默认 0）、`line_limit?: int`：按行切片，响应附加 `line_offset`/`line_total`；第 0 页含 `#SZ1/#K/#P` 头部
 - `out_file?: str`：全文写盘（不受 120,000 字符截断限制），相对路径落到 `%TEMP%/ida_mcp_out/`，返回 `{name, ea, level, stats, file, chars}`，不回传 `compressed`
-- `expand_macros?: bool`：内联展开全部 `#P` 序列宏（输出无宏定义/引用）
+- `expand_macros?: bool | "annotate"`：`true` 内联展开全部 `#P` 序列宏（输出无宏定义/引用）；`"annotate"` 保留 `#P` 定义与引用行，在每个宏引用行尾追加 `; = <展开指令序列>` 注释
 - `with_map?: bool`：附带 Ln 标签 → 块首地址映射。内联返回时加 `map` 字段（`{"L0":"0x..",...}`）；`out_file` 落盘时写 sidecar `<out_file>.map.json` 并返回 `map_file`。函数内直接跳转目标恒渲染为 Ln 标签（含 IDA 已命名 `loc_xxx` 目标），map 与压缩文本标签一一对应
 
 `extract_block` 说明：重跑确定性 ultra 压缩（标签按地址序分配，与 `compress_function` 输出一致）后按标签切片，用于给块分析子代理准备分片 prompt，替代手工切分完整压缩文本。
 
 返回约定：
 
-- 默认：`{name, ea, level, stats, truncated, compressed}`；`compressed` 恒排最后，显示截断时 `stats`（`{orig, out, elim, ratio}`）仍可读；超过 120,000 字符截断并置 `truncated=true`
+- 默认：`{name, ea, level, stats, hint, truncated, compressed}`；`compressed` 恒排最后，显示截断时 `stats`（`{orig, out, elim, ratio}`）仍可读；超过 120,000 字符截断并置 `truncated=true`。`hint` 为场景分流提示（decompile/disasm/SEMZ 各自适用场景与解码手册位置），仅随响应返回，不落盘、不拼进 `compressed` 文本
+- ultra 头部 `#SZ1` 行后恒有一行 `#summary blocks=N macros=M consts=K jt=J[(indirect)] [frame=F]`：块数/宏数/常量池大小/间接跳转数（`jt=0` 无 `(indirect)` 后缀）/帧大小（无帧消隐时省略 frame 字段），供解码前快速判断形态
 - 压缩级别：`safe`（仅字典）、`full`（+保守死代码消除）、`max`（+nop/融合）、`ultra`（默认，全局固定表 + 帧消隐 `#f=N` + 宏 `#P` + 常量池 `#K`）
 - `arch=auto`：IDA 侧工具按 IDB `procname`+位宽判定，`compress_text` 按寄存器/助记符启发式判定
-- 压缩格式（`#SZ1` 头部、`#K` 常量池、`#P` 序列宏、融合行）的完整解码规则见 `instructor/LLM_INSTRUCTOR.md`
+- 压缩格式（`#SZ1` 头部、`#summary` 摘要行、`#K` 常量池、`#P` 序列宏、融合行）的完整解码规则见 `instructor/LLM_INSTRUCTOR.md`；速查版见 MCP resource `ida://semz/manual`
 
 ### 4.4 Modeling Tools
 
