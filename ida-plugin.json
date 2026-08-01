@@ -1,0 +1,11 @@
+{
+  "IDAMetadataDescriptorVersion": 1,
+  "plugin": {
+    "name": "IDA-MCP",
+    "categories": ["disassembly-and-processor-modules", "decompilation", "debugging-and-tracing", "api-scripting-and-automation"],
+    "entryPoint": "ida_mcp.py",
+    "idaVersions": ">=8.4",
+    "description": "FastMCP server, gateway, and automation tools for IDA Pro.",
+    "version": "0.2.1"
+  }
+}

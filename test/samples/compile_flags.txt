@@ -1,0 +1,4 @@
+-xc
+-IC:\\tools\\msys64\\clang64\\include
+-IC:\\tools\\msys64\\clang64\\lib\\clang\\21\\include
+--target=x86_64-w64-mingw32

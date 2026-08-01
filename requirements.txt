@@ -1,0 +1,7 @@
+fastmcp
+starlette
+uvicorn
+pydantic
+pytest
+colorama
+unicorn  # shell-analysis emulation tools (api_emu); lazy-imported, clear error if missing

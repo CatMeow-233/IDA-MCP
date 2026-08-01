@@ -1,0 +1,293 @@
+{
+  "sample": {
+    "name": "complex.exe",
+    "source": "test/samples/complex.c",
+    "sha256": "fe2339079842e770abb41ec8f5f1b7b9018abd3d2044df88542430838934c556",
+    "arch": "x86_64",
+    "bits": 64,
+    "endian": "little",
+    "image_base": "0x140000000",
+    "metadata_source": "ida_ida"
+  },
+  "functions": {
+    "ida_mcp_point_make": {
+      "start_ea": "0x140001420",
+      "end_ea": "0x140001446",
+      "first_16_hex": "55 48 83 EC 10 48 8D 6C 24 10 89 4D F4 89 55 F0"
+    },
+    "ida_mcp_rect_init": {
+      "start_ea": "0x1400014A0",
+      "end_ea": "0x14000157A"
+    },
+    "ida_mcp_list_push_back": {
+      "start_ea": "0x1400016E0",
+      "end_ea": "0x140001781"
+    },
+    "ida_mcp_apply_operation": {
+      "start_ea": "0x140001950",
+      "end_ea": "0x14000199C"
+    },
+    "ida_mcp_stack_heavy_transform": {
+      "start_ea": "0x140001AC0",
+      "end_ea": "0x140001CB2",
+      "signature": "int32_t __cdecl ida_mcp_stack_heavy_transform(const int32_t *input, int32_t count, const char *label)",
+      "basic_block_count": 17
+    },
+    "ida_mcp_patch_target": {
+      "start_ea": "0x140001CC0",
+      "end_ea": "0x140001CFD"
+    },
+    "ida_mcp_init_records": {
+      "start_ea": "0x140001D00",
+      "end_ea": "0x140001E0A"
+    },
+    "ida_mcp_complex_dispatch": {
+      "start_ea": "0x140001E10",
+      "end_ea": "0x140001FA7",
+      "signature": "int32_t __cdecl ida_mcp_complex_dispatch(int32_t seed)",
+      "basic_block_count": 4,
+      "callee_count": 12
+    },
+    "main": {
+      "start_ea": "0x140001FB0",
+      "end_ea": "0x140002035",
+      "signature": "int __cdecl main(int argc, char **argv)"
+    }
+  },
+  "strings": {
+    "IDA_MCP_COMPLEX_SENTINEL_ENTRY": {
+      "ea": "0x1400040A8",
+      "length": 31
+    },
+    "IDA_MCP_COMPLEX_SENTINEL_RECT": {
+      "ea": "0x1400040C7",
+      "length": 30
+    },
+    "IDA_MCP_COMPLEX_SENTINEL_LIST": {
+      "ea": "0x1400040E5",
+      "length": 30
+    },
+    "IDA_MCP_COMPLEX_SENTINEL_STACK": {
+      "ea": "0x140004103",
+      "length": 31
+    },
+    "IDA_MCP_COMPLEX_SENTINEL_CALLBACK": {
+      "ea": "0x140004122",
+      "length": 34
+    },
+    "IDA_MCP_COMPLEX_SENTINEL_PATCH_TARGET": {
+      "ea": "0x140004144",
+      "length": 38
+    },
+    "IDA_MCP_STACK_RECT": {
+      "ea": "0x14000416A",
+      "length": 19
+    },
+    "IDA_MCP_STACK_LABEL": {
+      "ea": "0x1400041C8",
+      "length": 20
+    },
+    "IDA_MCP_COMPLEX_SENTINEL_MAIN_BEGIN": {
+      "ea": "0x14000420B",
+      "length": 36
+    },
+    "IDA_MCP_COMPLEX_SENTINEL_MAIN_END result=%d\n": {
+      "ea": "0x14000422F",
+      "length": 45
+    }
+  },
+  "globals": {
+    "ida_mcp_sentinel_entry": {
+      "ea": "0x140007000",
+      "size": 8,
+      "points_to": "0x1400040A8",
+      "initial_hex": "0x00000001400040A8"
+    },
+    "ida_mcp_sentinel_strings": {
+      "ea": "0x140007010",
+      "size": 40
+    },
+    "ida_mcp_global_counter": {
+      "ea": "0x140007038",
+      "size": 4,
+      "initial_value": 7
+    },
+    "ida_mcp_patch_bytes": {
+      "ea": "0x140007040",
+      "size": 16,
+      "initial_hex": "41 42 43 44 45 46 47 48 49 4A 4B 4C 4D 4E 4F 50"
+    },
+    "ida_mcp_operations": {
+      "ea": "0x140007050",
+      "size": 32,
+      "first_target": "0x1400018B0"
+    },
+    "ida_mcp_global_list": {
+      "ea": "0x1400070F0",
+      "size": 24
+    },
+    "ida_mcp_global_records": {
+      "ea": "0x140007110",
+      "size": 312
+    },
+    "ida_mcp_sink": {
+      "ea": "0x140007248",
+      "size": 4
+    }
+  },
+  "segments": {
+    ".text": {
+      "start_ea": "0x140001000",
+      "end_ea": "0x140004000",
+      "perm": "r-x",
+      "class": "CODE",
+      "bitness": 48
+    },
+    ".data": {
+      "start_ea": "0x140007000",
+      "end_ea": "0x140008000",
+      "perm": "rw-",
+      "class": "DATA",
+      "bitness": 48
+    }
+  },
+  "entry_points": {
+    "required_names": [
+      "mainCRTStartup"
+    ],
+    "total": 3
+  },
+  "memory": {
+    "default_function": "ida_mcp_point_make",
+    "default_string": "IDA_MCP_COMPLEX_SENTINEL_ENTRY",
+    "default_global": "ida_mcp_sink"
+  },
+  "modify": {
+    "safe_comment_address": "0x140001420",
+    "safe_patch_address": "0x140007040",
+    "safe_patch_original_hex4": "41 42 43 44",
+    "safe_patch_test_hex4": "51 52 53 54",
+    "safe_global_for_type": "ida_mcp_sink"
+  },
+  "modeling": {
+    "safe_code_address": "0x140001420",
+    "safe_code_function_end": "0x140001446",
+    "safe_string_address": "0x1400040A8",
+    "safe_string_length": 31,
+    "make_data_result": {
+      "normalized_type": "byte",
+      "old_kind": "string",
+      "new_kind": "data",
+      "changed": true
+    },
+    "make_string_result": {
+      "old_kind": "data",
+      "new_kind": "string",
+      "changed": true
+    }
+  },
+  "relationships": {
+    "main_callees": [
+      "ida_mcp_complex_dispatch",
+      "__main",
+      "printf",
+      "atoi",
+      "puts"
+    ],
+    "complex_dispatch_callees": [
+      "ida_mcp_list_push_back",
+      "ida_mcp_list_find",
+      "ida_mcp_list_sum",
+      "ida_mcp_list_clear",
+      "ida_mcp_apply_operation",
+      "ida_mcp_recursive_factorial",
+      "ida_mcp_visit_records",
+      "ida_mcp_stack_heavy_transform",
+      "ida_mcp_patch_target",
+      "ida_mcp_init_records",
+      "printf",
+      "memcpy"
+    ],
+    "patch_target_callers": [
+      "ida_mcp_complex_dispatch"
+    ],
+    "rect_init_callers": [
+      "ida_mcp_stack_heavy_transform",
+      "ida_mcp_init_records"
+    ],
+    "entry_string_xrefs_to": [
+      {
+        "from": "0x140007000",
+        "iscode": false
+      }
+    ]
+  },
+  "stack_frame": {
+    "ida_mcp_stack_heavy_transform": {
+      "required_variables": [
+        "input",
+        "count",
+        "label",
+        "limit",
+        "total",
+        "frame"
+      ],
+      "frame_type": "ida_mcp_stack_heavy_transform::IdaMcpStackFrameFixture",
+      "method": "ida_frame",
+      "variable_offsets": {
+        "input": 376,
+        "count": 372,
+        "label": 360,
+        "limit": 84,
+        "total": 80,
+        "frame": 88
+      }
+    }
+  },
+  "imports": {
+    "required_names": [
+      "malloc",
+      "free",
+      "memset",
+      "strncpy",
+      "printf",
+      "puts",
+      "atoi"
+    ]
+  },
+  "types": {
+    "initial_local_type_count": 0,
+    "note": "The compiled PE does not populate IDA local types automatically. Type tests should declare IdaMcpPoint, IdaMcpRect, IdaMcpNode, IdaMcpList, IdaMcpPayload, and IdaMcpRecord through MCP before asserting struct APIs.",
+    "fixture_structs": [
+      "IdaMcpPoint",
+      "IdaMcpRect",
+      "IdaMcpNode",
+      "IdaMcpList",
+      "IdaMcpPayload",
+      "IdaMcpRecord"
+    ],
+    "struct_details": {
+      "IdaMcpRect": {
+        "size": 52,
+        "member_count": 4,
+        "members": {
+          "top_left": {"offset": 0, "size": 8},
+          "bottom_right": {"offset": 8, "size": 8},
+          "color": {"offset": 16, "size": 4},
+          "name": {"offset": 20, "size": 32}
+        }
+      },
+      "IdaMcpRecord": {
+        "size": 116,
+        "member_count": 5,
+        "members": {
+          "magic": {"offset": 0, "size": 4},
+          "status": {"offset": 4, "size": 4},
+          "bounds": {"offset": 8, "size": 52},
+          "payload": {"offset": 60, "size": 24},
+          "scores": {"offset": 84, "size": 32}
+        }
+      }
+    }
+  }
+}
