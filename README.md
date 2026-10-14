@@ -1,4 +1,4 @@
-KIMI K3最新力作
+
 # IDA-MCP
 
 IDA-MCP is an IDA Pro plugin that exposes IDA analysis, database modification,
